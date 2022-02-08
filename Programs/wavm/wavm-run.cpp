@@ -40,6 +40,7 @@ using namespace WAVM::Runtime;
 
 double compile_s;
 double run_s;
+bool time_compilation;
 
 // A resolver that generates a stub if an inner resolver does not resolve a name.
 struct StubFallbackResolver : Resolver
@@ -79,7 +80,10 @@ static bool loadTextOrBinaryModule(const char* filename,
 {
 	// Start measuring time
 	struct timeval begin, end;
-	gettimeofday(&begin, 0);
+	if (time_compilation) {
+		gettimeofday(&begin, 0);
+	}
+
 	// If the file starts with the WASM binary magic number, load it as a binary module.
 	if(fileBytes.size() >= sizeof(WASM::magicNumber)
 	   && !memcmp(fileBytes.data(), WASM::magicNumber, sizeof(WASM::magicNumber)))
@@ -89,11 +93,13 @@ static bool loadTextOrBinaryModule(const char* filename,
 			   fileBytes.data(), fileBytes.size(), outModule, featureSpec, &loadError))
 		{
 			// Stop measuring time and calculate the elapsed time
-			gettimeofday(&end, 0);
-			long seconds = end.tv_sec - begin.tv_sec;
-			long microseconds = end.tv_usec - begin.tv_usec;
-			double elapsed = seconds + microseconds*1e-6;
-			compile_s+=elapsed;
+			if (time_compilation) {
+				gettimeofday(&end, 0);
+				long seconds = end.tv_sec - begin.tv_sec;
+				long microseconds = end.tv_usec - begin.tv_usec;
+				double elapsed = seconds + microseconds*1e-6;
+				compile_s+=elapsed;
+			}
 			return true;
 		}
 		else
@@ -195,6 +201,7 @@ void showRunHelp(Log::Category outputCategory)
 				"Options:\n"
 				"  --function=<name>     Specify function name to run in module (default:main)\n"
 				"  --precompiled         Use precompiled object code in program file\n"
+				"  --time-compilation    Output the time taken for compilation and execution\n"
 				"  --nocache             Don't use the WAVM object cache\n"
 				"  --enable <feature>    Enable the specified feature. See the list of supported\n"
 				"                        features below.\n"
@@ -341,6 +348,9 @@ struct State
 			else if(!strcmp(*nextArg, "--nocache"))
 			{
 				allowCaching = false;
+			}
+			else if(!strcmp(*nextArg, "--time-compilation")) {
+				time_compilation = true;
 			}
 			else if(!strcmp(*nextArg, "--mount-root"))
 			{
@@ -838,7 +848,9 @@ struct State
 
 		// Start measuring time
 		struct timeval begin, end;
-		gettimeofday(&begin, 0);
+		if (time_compilation) {
+			gettimeofday(&begin, 0);
+		}
 
 		auto executeThunk = [&] { return execute(irModule, instance); };
 		int result;
@@ -853,11 +865,13 @@ struct State
 		}
 		Timing::logTimer("Executed program", executionTimer);
 		// Stop measuring time and calculate the elapsed time
-		gettimeofday(&end, 0);
-		long seconds = end.tv_sec - begin.tv_sec;
-		long microseconds = end.tv_usec - begin.tv_usec;
-		double elapsed = seconds + microseconds*1e-6;
-		run_s+=elapsed;
+		if (time_compilation) {
+			gettimeofday(&end, 0);
+			long seconds = end.tv_sec - begin.tv_sec;
+			long microseconds = end.tv_usec - begin.tv_usec;
+			double elapsed = seconds + microseconds*1e-6;
+			run_s+=elapsed;
+		}
 
 		// Log the peak memory usage.
 		Uptr peakMemoryUsage = Platform::getPeakMemoryUsageBytes();
@@ -876,8 +890,10 @@ struct State
 											Errors::fatalf("Runtime exception: %s",
 														   describeException(exception).c_str());
 										});
-		printf("Compile time: %.2f s\n", compile_s);
-		printf("Run time: %.2f s\n", run_s);
+		if (time_compilation) {
+			printf("Compile time: %.2f s\n", compile_s);
+			printf("Run time: %.2f s\n", run_s);
+		}
 		return result;
 	}
 };
@@ -885,6 +901,7 @@ struct State
 int execRunCommand(int argc, char** argv)
 {
 	State state;
+	time_compilation = false;
 	compile_s=0;
 	run_s=0;
 	return state.runAndCatchRuntimeExceptions(argv);
